@@ -1,5 +1,27 @@
 var createSecret = (function(Object, String) {
 
+	'use strict';
+
+	// If this is not an ES5 environment, we can't do anything.
+	if (
+		/* We'll at least need the following functions.
+		 * While not exhaustive, this should be a good enough list to make sure
+		 * we're in an ES5 environment.
+		 */
+		!Object.getOwnPropertyNames
+		|| !Object.getOwnPropertyDescriptor
+		|| !Object.defineProperty
+		|| !Object.defineProperties
+		|| !Object.keys
+		|| !Object.create
+		|| !Object.freeze
+		|| !Object.isFrozen
+		|| !Object.isExtensible
+	)
+		return function NoES5() {
+			throw new Error('An ECMAScript 5 environment was not detected.');
+		};
+
 	// We capture the built-in functions and methods as they are now and store them as references so that we can
 	// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
 	// details about or alter the secrets stored on an object.
@@ -44,7 +66,16 @@ var createSecret = (function(Object, String) {
 		// idNum will ensure identifiers are unique.
 		idNum = [ MIN_PRECISION ],
 		preIdentifier = randStr(7) + '0',
-		SECRET_KEY = '!S:' + getIdentifier();
+		SECRET_KEY = '!S:' + getIdentifier(),
+
+		protoIsMutable = (function() {
+			// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
+			var A = create(null),
+				A2 = create(null),
+				B = create(A);
+			B.__proto__ = A2;
+			return getPrototypeOf(B) === A2;
+		})();
 
 	(function() {
 		// Override get(Own)PropertyNames and get(Own)PropertyDescriptors to hide SECRET_KEY.
@@ -159,10 +190,23 @@ var createSecret = (function(Object, String) {
 		var id = nextUniqueId();
 
 		return function secret(obj) {
-			var secrets = Secrets(obj);
-			if (secrets)
-				return secrets[id] || secrets[id] = create(null);
-			else
+			var secrets = Secrets(obj),
+				S, proto, protoS, protoSTest;
+			if (secrets) {
+				S = secrets[id];
+				if (!S) {
+					proto = getPrototypeOf(obj);
+					secrets[id] = S = create(proto ? secret(proto) : null);
+				} else if (protoIsMutable) {
+					// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
+					proto = getPrototypeOf(obj);
+					protoS = getPrototypeOf(S);
+					protoSTest = proto == null ? null : secret(proto);
+					if (protoSTest !== protoS)
+						S.__proto__ = protoSTest;
+				}
+				return S;
+			} else
 				// The object may have been frozen in another frame.
 				throw new Error('This object doesn\'t support secrets.');
 		};
@@ -174,7 +218,6 @@ var createSecret = (function(Object, String) {
 		// really only happen if an object is passed in from another frame, because in this frame preventExtensions
 		// is overridden to add a Secrets property first.
 
-		if(O === Object.prototype) return;
 		if (O !== Object(O)) throw new Error('Not an object: ' + O);
 		if (!hasOwn(O, SECRET_KEY)) {
 			if (!isExtensible(O)) return;
