@@ -15,7 +15,6 @@ var createSecret = (function(Object, String) {
 		|| !Object.keys
 		|| !Object.create
 		|| !Object.freeze
-		|| !Object.isFrozen
 		|| !Object.isExtensible
 	)
 		return function NoES5() {
@@ -31,18 +30,18 @@ var createSecret = (function(Object, String) {
 		create = Object.create,
 		getPrototypeOf = Object.getPrototypeOf,
 		isExtensible = Object.isExtensible,
-		isFrozen = Object.isFrozen,
 		freeze = Object.freeze,
 		keys = Object.keys,
 		getOwnPropertyNames = Object.getOwnPropertyNames,
 		getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-		defineProperty = Object.defineProperty,
+		_defineProperty = Object.defineProperty,
 		hasOwn = lazyBind(Object.prototype.hasOwnProperty),
 		push = lazyBind(Array.prototype.push),
 		forEach = lazyBind(Array.prototype.forEach),
 		map = lazyBind(Array.prototype.map),
-		filter = lazyBind(Array.prototype.filter),
 		join = lazyBind(Array.prototype.join),
+		splice = lazyBind(Array.prototype.splice),
+		ArrayIndexOf = lazyBind(Array.prototype.indexOf),
 		fromCharCode = String.fromCharCode,
 		apply = lazyBind(Function.prototype.apply),
 		bind = lazyBind(Function.prototype.bind),
@@ -64,7 +63,13 @@ var createSecret = (function(Object, String) {
 		MIN_PRECISION = -Math.pow(2, 53),
 		MAX_PRECISION = -MIN_PRECISION,
 		// idNum will ensure identifiers are unique.
-		idNum = [ MIN_PRECISION ],
+		idNum = (function() {
+			// Use an Array-like rather than a true array to protect against setters defined on Array.prototype indices.
+			var idNum = create(null);
+			idNum[0] = MIN_PRECISION;
+			idNum.length = 1;
+			return idNum;
+		})(),
 		preIdentifier = randStr(7) + '0',
 		SECRET_KEY = '!S:' + getIdentifier(),
 
@@ -87,11 +92,15 @@ var createSecret = (function(Object, String) {
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			defineProperty(Object, u, {
+			_defineProperty(Object, u, {
 				value: function(obj) {
-					return filter(apply(original, this, arguments), function(u) {
-						return u != SECRET_KEY;
-					});
+					var names = apply(original, this, arguments);
+					if (u === 'getOwnPropertyNames' && !hasOwn(obj, SECRET_KEY))
+						return names;
+					var index = ArrayIndexOf(names, SECRET_KEY);
+					if (~index)
+						splice(names, index, 1);
+					return names;
 				},
 				enumerable: false,
 				writable: true,
@@ -106,7 +115,7 @@ var createSecret = (function(Object, String) {
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			defineProperty(Object, u, {
+			_defineProperty(Object, u, {
 				value: function(obj) {
 					var desc = apply(original, this, arguments);
 					delete desc[SECRET_KEY];
@@ -123,7 +132,7 @@ var createSecret = (function(Object, String) {
 	// Override functions which prevent extensions on objects to go ahead and add a secret map first.
 	[ 'preventExtensions', 'seal', 'freeze' ].forEach(function(u) {
 		var original = Object[u];
-		defineProperty(Object, u, {
+		_defineProperty(Object, u, {
 			value: function(obj) {
 				// Define the secret map.
 				Secrets(obj);
@@ -141,7 +150,7 @@ var createSecret = (function(Object, String) {
 			 */
 
 			var trapBypasses = create(null);
-			trapBypasses.defineProperty = defineProperty;
+			trapBypasses.defineProperty = _defineProperty;
 			trapBypasses.hasOwn = hasOwn;
 			trapBypasses.get = function(target, name) { return target[name]; };
 
@@ -218,15 +227,16 @@ var createSecret = (function(Object, String) {
 		// really only happen if an object is passed in from another frame, because in this frame preventExtensions
 		// is overridden to add a Secrets property first.
 
-		if (O !== Object(O)) throw new Error('Not an object: ' + O);
+		if (O !== Object(O))
+			throw new Error('Not an object: ' + O);
+
 		if (!hasOwn(O, SECRET_KEY)) {
 			if (!isExtensible(O)) return;
-			defineProperty(O, SECRET_KEY, own({
+			defineProperty(O, SECRET_KEY, {
 
 				get: (function() {
 					var secretMap = create(null);
 					return function getSecret() {
-						var value;
 						// The lock protects against retrieval in the event that the SECRET_KEY is discovered.
 						if (locked) return;
 						locked = true;
@@ -237,10 +247,10 @@ var createSecret = (function(Object, String) {
 				enumerable: false,
 				configurable: false
 
-			}));
+			});
 		}
-		locked = false;
-		
+
+		locked = false;	
 		return O[SECRET_KEY];
 
 	}
@@ -269,7 +279,8 @@ var createSecret = (function(Object, String) {
 	}
 
 	function getRandStrs(count, length) {
-		var r = [ ];
+		var r = create(null);
+		r.length = 0;
 		for(var i = 0; i < count; i++) {
 			push(r, randStr(length));
 		}
@@ -313,17 +324,25 @@ var createSecret = (function(Object, String) {
 		} else return Math.random;
 	}
 
-	function own(obj) {
+	// We only want to define with own properties of the descriptor.
+	function defineProperty(obj, name, desc) {
+		if ('value' in desc && !hasOwn(desc, 'value')
+			|| 'get' in desc && !hasOwn(desc, 'get')
+			|| 'set' in desc && !hasOwn(desc, 'set')
+			|| 'writable' in desc && !hasOwn(desc, 'writable'))
+			desc = safeDescriptor(desc);
+		return _defineProperty(obj, name, desc);
+	}
 
-		var O = create(null);
-
-		forEach(getOwnPropertyNames(obj), function(key) {
-			defineProperty(O, key,
-				getOwnPropertyDescriptor(obj, key));
-		});
-
+	function safeDescriptor(obj) {
+		if (obj == null)
+			throw new TypeError('Argument cannot be null or undefined.');
+		obj = Object(obj);
+		var O = create(null),
+			k = keys(obj);
+		for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
+			O[key] = obj[key];
 		return O;
-
 	}
 
 // We pass in Object and String to ensure that they cannot be changed later to something else.
