@@ -25,7 +25,7 @@ If the secret generator is guarded, the properties cannot be read by scripts whi
             return priv(this).x + ',' + priv(this).y;
         };
 
-        return function Point;
+        return Point;
     
     })();
 
@@ -55,7 +55,7 @@ Using secrets in this way allows class-private variables.  This means two instan
             priv(this).y += priv(p).y;
         };
 
-        return function Point;
+        return Point;
     
     })();
 
