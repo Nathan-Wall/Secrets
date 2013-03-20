@@ -75,11 +75,46 @@ var createSecret = (function(Object, String) {
 
 		protoIsMutable = (function() {
 			// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
-			var A = create(null),
-				A2 = create(null),
+			var A = { },
+				A2 = { },
 				B = create(A);
 			B.__proto__ = A2;
 			return getPrototypeOf(B) === A2;
+		})(),
+		setPrototypeOf = (function() {
+
+			if (!protoIsMutable)
+				return;
+
+			var _setProto = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').set;
+			if (_setProto)
+				return lazyBind(_setProto);
+
+			// If the implementation supports mutable proto but doesn't have a __proto__ setter, see if
+			// mutable proto is possible on objects which don't inherit from Object.prototype.
+			// This behavior has been observed on Chrome 25 but is believed to be fixed on a modern V8.
+			// https://mail.mozilla.org/pipermail/es-discuss/2013-March/029244.html
+			// However, the version of V8 mentioned in the above post does not support __proto__ setter.
+			// It is believed a later version of V8 will support a __proto__ setter, but for interim
+			// implementations it may be impossible to mutate [[Prototype]] on an object which doesn't
+			// inherit from `Object.prototype`.
+			// It is also currently unknown which direction the spec will go on this issue.
+			var A = Object.create(null),
+				B = Object.create(null);
+			A.test = 5;
+			B.__proto__ = A;
+			if (B.test == 5)
+				return function(obj, proto) {
+					obj.__proto__ = proto;
+				};
+
+			return function() {
+				throw new Error(
+					'Mutable prototype is supported by this implementation, but it does not support mutating the prototype '
+					+ 'of an object which doesn\'t inherit from Object.prototype'
+				);
+			};
+
 		})();
 
 	(function() {
@@ -212,7 +247,7 @@ var createSecret = (function(Object, String) {
 					protoS = getPrototypeOf(S);
 					protoSTest = proto == null ? null : secret(proto);
 					if (protoSTest !== protoS)
-						S.__proto__ = protoSTest;
+						setPrototypeOf(S, protoSTest);
 				}
 				return S;
 			} else
