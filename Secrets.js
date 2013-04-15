@@ -86,7 +86,23 @@ var createSecret = (function(Object, String) {
 			if (!protoIsMutable)
 				return;
 
-			var _setProto = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').set;
+			// TODO: Keep up with the development of the ES6 spec, and revise if possible.
+			return function() {
+				throw new Error(
+					'Support for mutable prototype with Secrets has been disabled due to the appearance that '
+					+ 'mutable prototype won\'t be supported in ES6 for objects which don\'t inherit from Object.prototype.'
+				);
+			};
+
+			// It is believed the spec will allow the setter on `__proto__` to work on any object form the same realm [1].
+			// This should allow us to keep up with changing prototypes in the vast majority of cases since all secret
+			// objects will be created in a single realm, no matter what realm the original object is from which the
+			// secrets belong to.  There is a possibility of breakage if `__proto__` is deleted from this realm but
+			// not others, in which case objects in other realms would be allowed to mutate `__proto__` while secrets
+			// in this realm based on those objects would not.
+			// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
+			var protoDesc = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__'),
+				_setProto = protoDesc && protoDesc.set;
 			if (_setProto)
 				return lazyBind(_setProto);
 
@@ -127,7 +143,7 @@ var createSecret = (function(Object, String) {
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			_defineProperty(Object, u, {
+			defineProperty(Object, u, {
 				value: function(obj) {
 					var names = apply(original, this, arguments);
 					if (u === 'getOwnPropertyNames' && !hasOwn(obj, SECRET_KEY))
@@ -150,7 +166,7 @@ var createSecret = (function(Object, String) {
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			_defineProperty(Object, u, {
+			defineProperty(Object, u, {
 				value: function(obj) {
 					var desc = apply(original, this, arguments);
 					delete desc[SECRET_KEY];
@@ -167,7 +183,7 @@ var createSecret = (function(Object, String) {
 	// Override functions which prevent extensions on objects to go ahead and add a secret map first.
 	[ 'preventExtensions', 'seal', 'freeze' ].forEach(function(u) {
 		var original = Object[u];
-		_defineProperty(Object, u, {
+		defineProperty(Object, u, {
 			value: function(obj) {
 				// Define the secret map.
 				Secrets(obj);
@@ -242,12 +258,33 @@ var createSecret = (function(Object, String) {
 					proto = getPrototypeOf(obj);
 					secrets[id] = S = create(proto ? secret(proto) : null);
 				} else if (protoIsMutable) {
-					// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
+					// The prototype on the object changed. Change the secret's
+					// prototype to reflect this.
 					proto = getPrototypeOf(obj);
 					protoS = getPrototypeOf(S);
 					protoSTest = proto == null ? null : secret(proto);
 					if (protoSTest !== protoS)
-						setPrototypeOf(S, protoSTest);
+						try {
+							setPrototypeOf(S, protoSTest);
+						} catch(x) {
+							// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
+							// the spec goes in the direction it is currently expected to go [1], this should
+							// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
+							// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
+							// There are some other possible non-complaint reasons this path could be taken which
+							// come from pre-ES6 era `__proto__` inconsistencies in browsers.
+							// The fallback is to generate a new object which has the same properties as `S` and
+							// then return that.  This is a little hacky because we don't actually end up preserving
+							// object identity across the same secrets, and it could cause certain situations to
+							// break, such as using secrets as keys in a WeakMap, or some other place where object
+							// identity of secrets matters.  However, it is so unlikely that the two conditions
+							// necessary to cause problems here will occur together (since both are by themselves
+							// edge-case scenarios), we are happy enough with this solution, since it is the best
+							// we can do given the direction ES6 is going.
+							// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
+							secrets[id] = create(protoSTest);
+							S = mixin(secrets[id], S);
+						}
 				}
 				return S;
 			} else
@@ -288,6 +325,13 @@ var createSecret = (function(Object, String) {
 		locked = false;	
 		return O[SECRET_KEY];
 
+	}
+
+	function mixin(target, source) {
+		forEach(getOwnPropertyNames(source), function(name) {
+			defineProperty(target, name, getOwnPropertyDescriptor(source, name));
+		}
+		return target;
 	}
 
 	function getIdentifier() {
@@ -364,7 +408,9 @@ var createSecret = (function(Object, String) {
 		if ('value' in desc && !hasOwn(desc, 'value')
 			|| 'get' in desc && !hasOwn(desc, 'get')
 			|| 'set' in desc && !hasOwn(desc, 'set')
-			|| 'writable' in desc && !hasOwn(desc, 'writable'))
+			|| 'enumerable' in desc && !hasOwn(desc, 'enumerable')
+			|| 'writable' in desc && !hasOwn(desc, 'writable')
+			|| 'configurable' in desc && !hasOwn(desc, 'configurable'))
 			desc = safeDescriptor(desc);
 		return _defineProperty(obj, name, desc);
 	}
