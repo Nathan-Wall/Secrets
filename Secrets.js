@@ -88,6 +88,7 @@ var createSecret = (function(Object, String) {
 
 			// TODO: Keep up with the development of the ES6 spec, and revise if possible.
 			return function() {
+				locked = true;
 				throw new Error(
 					'Support for mutable prototype with Secrets has been disabled due to the appearance that '
 					+ 'mutable prototype won\'t be supported in ES6 for objects which don\'t inherit from Object.prototype.'
@@ -125,6 +126,7 @@ var createSecret = (function(Object, String) {
 				};
 
 			return function() {
+				locked = true;
 				throw new Error(
 					'Mutable prototype is supported by this implementation, but it does not support mutating the prototype '
 					+ 'of an object which doesn\'t inherit from Object.prototype'
@@ -287,9 +289,11 @@ var createSecret = (function(Object, String) {
 						}
 				}
 				return S;
-			} else
+			} else {
 				// The object may have been frozen in another frame.
+				locked = true;
 				throw new Error('This object doesn\'t support secrets.');
+			}
 		};
 
 	};
@@ -299,8 +303,10 @@ var createSecret = (function(Object, String) {
 		// really only happen if an object is passed in from another frame, because in this frame preventExtensions
 		// is overridden to add a Secrets property first.
 
-		if (O !== Object(O))
+		if (O !== Object(O)) {
+			locked = true;
 			throw new Error('Not an object: ' + O);
+		}
 
 		if (!hasOwn(O, SECRET_KEY)) {
 			if (!isExtensible(O)) return;
@@ -330,7 +336,7 @@ var createSecret = (function(Object, String) {
 	function mixin(target, source) {
 		forEach(getOwnPropertyNames(source), function(name) {
 			defineProperty(target, name, getOwnPropertyDescriptor(source, name));
-		}
+		});
 		return target;
 	}
 
@@ -416,8 +422,10 @@ var createSecret = (function(Object, String) {
 	}
 
 	function safeDescriptor(obj) {
-		if (obj == null)
+		if (obj == null) {
+			locked = true;
 			throw new TypeError('Argument cannot be null or undefined.');
+		}
 		obj = Object(obj);
 		var O = create(null),
 			k = keys(obj);
