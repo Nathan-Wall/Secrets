@@ -1,4 +1,4 @@
-var createSecret = (function(Object, String) {
+var Secrets = (function(Object, String) {
 
 	'use strict';
 
@@ -247,55 +247,57 @@ var createSecret = (function(Object, String) {
 
 	}
 	
-	return function createSecret() {
+	return {
+		create: function createSecret() {
 
-		var id = nextUniqueId();
+			var id = nextUniqueId();
 
-		return function secret(obj) {
-			var secrets = Secrets(obj),
-				S, proto, protoS, protoSTest;
-			if (secrets) {
-				S = secrets[id];
-				if (!S) {
-					proto = getPrototypeOf(obj);
-					secrets[id] = S = create(proto ? secret(proto) : null);
-				} else if (protoIsMutable) {
-					// The prototype on the object changed. Change the secret's
-					// prototype to reflect this.
-					proto = getPrototypeOf(obj);
-					protoS = getPrototypeOf(S);
-					protoSTest = proto == null ? null : secret(proto);
-					if (protoSTest !== protoS)
-						try {
-							setPrototypeOf(S, protoSTest);
-						} catch(x) {
-							// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
-							// the spec goes in the direction it is currently expected to go [1], this should
-							// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
-							// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
-							// There are some other possible non-complaint reasons this path could be taken which
-							// come from pre-ES6 era `__proto__` inconsistencies in browsers.
-							// The fallback is to generate a new object which has the same properties as `S` and
-							// then return that.  This is a little hacky because we don't actually end up preserving
-							// object identity across the same secrets, and it could cause certain situations to
-							// break, such as using secrets as keys in a WeakMap, or some other place where object
-							// identity of secrets matters.  However, it is so unlikely that the two conditions
-							// necessary to cause problems here will occur together (since both are by themselves
-							// edge-case scenarios), we are happy enough with this solution, since it is the best
-							// we can do given the direction ES6 is going.
-							// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
-							secrets[id] = create(protoSTest);
-							S = mixin(secrets[id], S);
-						}
+			return function secret(obj) {
+				var secrets = Secrets(obj),
+					S, proto, protoS, protoSTest;
+				if (secrets) {
+					S = secrets[id];
+					if (!S) {
+						proto = getPrototypeOf(obj);
+						secrets[id] = S = create(proto ? secret(proto) : null);
+					} else if (protoIsMutable) {
+						// The prototype on the object changed. Change the secret's
+						// prototype to reflect this.
+						proto = getPrototypeOf(obj);
+						protoS = getPrototypeOf(S);
+						protoSTest = proto == null ? null : secret(proto);
+						if (protoSTest !== protoS)
+							try {
+								setPrototypeOf(S, protoSTest);
+							} catch(x) {
+								// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
+								// the spec goes in the direction it is currently expected to go [1], this should
+								// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
+								// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
+								// There are some other possible non-complaint reasons this path could be taken which
+								// come from pre-ES6 era `__proto__` inconsistencies in browsers.
+								// The fallback is to generate a new object which has the same properties as `S` and
+								// then return that.  This is a little hacky because we don't actually end up preserving
+								// object identity across the same secrets, and it could cause certain situations to
+								// break, such as using secrets as keys in a WeakMap, or some other place where object
+								// identity of secrets matters.  However, it is so unlikely that the two conditions
+								// necessary to cause problems here will occur together (since both are by themselves
+								// edge-case scenarios), we are happy enough with this solution, since it is the best
+								// we can do given the direction ES6 is going.
+								// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
+								secrets[id] = create(protoSTest);
+								S = mixin(secrets[id], S);
+							}
+					}
+					return S;
+				} else {
+					// The object may have been frozen in another frame.
+					locked = true;
+					throw new Error('This object doesn\'t support secrets.');
 				}
-				return S;
-			} else {
-				// The object may have been frozen in another frame.
-				locked = true;
-				throw new Error('This object doesn\'t support secrets.');
-			}
-		};
+			};
 
+		}
 	};
 
 	function Secrets(O) {
