@@ -517,3 +517,7 @@ var WeakMapStoreFactory = (function(WeakMap) {
 	};
 
 })(Object, String, Error, TypeError);
+
+// Export for Node.
+if (typeof module == 'object' && typeof module.exports == 'object')
+	module.exports = Secrets;
