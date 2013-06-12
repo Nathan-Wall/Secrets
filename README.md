@@ -1,9 +1,9 @@
 Secrets
 =======
 
-Secrets can be used to tie "private" properties to objects in JavaScript.  Use `Secrets.create` to create a **secret generator**, a function which can be used to attach private properties to an object.
+Secrets can be used to tie "private" properties to objects in JavaScript.  Use `createSecret` to create a **secret generator**, a function which can be used to attach private properties to an object.
 
-    var priv = Secrets.create();
+    var priv = createSecret();
     
     var obj = { };
     priv(obj).foo = 'bar';
@@ -14,7 +14,7 @@ If the secret generator is guarded, the properties cannot be read by scripts whi
 
     var Point = (function() {
     
-        var priv = Secrets.create();
+        var priv = createSecret();
 
         function Point(x, y) {
             priv(this).x = x;
@@ -39,7 +39,7 @@ Using secrets in this way allows class-private variables.  This means two instan
 
     var Point = (function() {
     
-        var priv = Secrets.create();
+        var priv = createSecret();
 
         function Point(x, y) {
             priv(this).x = x;

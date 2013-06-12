@@ -1,77 +1,74 @@
-var Secrets = (function(Object, String) {
+var Secrets = (function(Object, String, Error, TypeError) {
 
 	'use strict';
 
-	// If this is not an ES5 environment, we can't do anything.
-	if (
-		/* We'll at least need the following functions.
-		 * While not exhaustive, this should be a good enough list to make sure
-		 * we're in an ES5 environment.
-		 */
-		!Object.getOwnPropertyNames
-		|| !Object.getOwnPropertyDescriptor
-		|| !Object.defineProperty
-		|| !Object.defineProperties
-		|| !Object.keys
-		|| !Object.create
-		|| !Object.freeze
-		|| !Object.isExtensible
-	)
-		return function NoES5() {
-			throw new Error('An ECMAScript 5 environment was not detected.');
-		};
+	var storageType = 'WeakKeyedStore',
 
-	// We capture the built-in functions and methods as they are now and store them as references so that we can
-	// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
-	// details about or alter the secrets stored on an object.
-	var lazyBind = Function.prototype.bind.bind(Function.prototype.call),
+		// We capture the built-in functions and methods as they are now and store them as references so that we can
+		// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
+		// details about or alter the secrets stored on an object.
+		lazyBind = Function.prototype.bind.bind(Function.prototype.call),
 
-		// ES5 functions
 		create = Object.create,
 		getPrototypeOf = Object.getPrototypeOf,
-		isExtensible = Object.isExtensible,
-		freeze = Object.freeze,
 		keys = Object.keys,
 		getOwnPropertyNames = Object.getOwnPropertyNames,
 		getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-		_defineProperty = Object.defineProperty,
+		isExtensible = Object.isExtensible,
+		freeze = Object.freeze,
+
 		hasOwn = lazyBind(Object.prototype.hasOwnProperty),
+
 		push = lazyBind(Array.prototype.push),
 		forEach = lazyBind(Array.prototype.forEach),
 		map = lazyBind(Array.prototype.map),
 		join = lazyBind(Array.prototype.join),
 		splice = lazyBind(Array.prototype.splice),
 		ArrayIndexOf = lazyBind(Array.prototype.indexOf),
+
 		fromCharCode = String.fromCharCode,
+
 		apply = lazyBind(Function.prototype.apply),
 		bind = lazyBind(Function.prototype.bind),
 
-		// ES Harmony functions
-		getPropertyNames = Object.getPropertyNames,
+		// We only want to define with own properties of the descriptor.
+		define = (function(defineProperty) {
+			return function define(obj, name, desc) {
+				if ('value' in desc && !hasOwn(desc, 'value')
+					|| 'get' in desc && !hasOwn(desc, 'get')
+					|| 'set' in desc && !hasOwn(desc, 'set')
+					|| 'enumerable' in desc && !hasOwn(desc, 'enumerable')
+					|| 'writable' in desc && !hasOwn(desc, 'writable')
+					|| 'configurable' in desc && !hasOwn(desc, 'configurable'))
+					desc = createSafeDescriptor(desc);
+				return defineProperty(obj, name, desc);
+			};
+			function createSafeDescriptor(obj) {
+				if (obj == null) {
+					locked = true;
+					throw new TypeError('Argument cannot be null or undefined.');
+				}
+				obj = Object(obj);
+				var O = create(null),
+					k = keys(obj);
+				for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
+					O[key] = obj[key];
+				return O;
+			}
+		})(Object.defineProperty);
 
-		// ES.next strawman functions
-		getPropertyDescriptors = Object.getPropertyDescriptors,
-		getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors,
+	var CouplerFactory = (function() {
 
-		// ES Harmony constructors
-		_Proxy = typeof Proxy == 'undefined' ? undefined : Proxy,
+	var create = Object.create,
 
-		// Determines whether object[SECRET_KEY] should expose the secret map.
-		locked = true,
+		createStore,
 
-		random = getRandomGenerator(),
-		MIN_PRECISION = -Math.pow(2, 53),
-		MAX_PRECISION = -MIN_PRECISION,
-		// idNum will ensure identifiers are unique.
-		idNum = (function() {
-			// Use an Array-like rather than a true array to protect against setters defined on Array.prototype indices.
-			var idNum = create(null);
-			idNum[0] = MIN_PRECISION;
-			idNum.length = 1;
-			return idNum;
-		})(),
-		preIdentifier = randStr(7) + '0',
-		SECRET_KEY = '!S:' + getIdentifier(),
+		mixin = function mixin(target, source) {
+			forEach(getOwnPropertyNames(source), function(name) {
+				define(target, name, getOwnPropertyDescriptor(source, name));
+			});
+			return target;
+		},
 
 		protoIsMutable = (function() {
 			// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
@@ -81,7 +78,7 @@ var Secrets = (function(Object, String) {
 			B.__proto__ = A2;
 			return getPrototypeOf(B) === A2;
 		})(),
-		setPrototypeOf = (function() {
+		setPrototypeOf = Object.setPrototypeOf || (function() {
 
 			if (!protoIsMutable)
 				return;
@@ -116,8 +113,8 @@ var Secrets = (function(Object, String) {
 			// implementations it may be impossible to mutate [[Prototype]] on an object which doesn't
 			// inherit from `Object.prototype`.
 			// It is also currently unknown which direction the spec will go on this issue.
-			var A = Object.create(null),
-				B = Object.create(null);
+			var A = create(null),
+				B = create(null);
 			A.test = 5;
 			B.__proto__ = A;
 			if (B.test == 5)
@@ -133,217 +130,172 @@ var Secrets = (function(Object, String) {
 				);
 			};
 
-		})();
+		})(),
 
-	(function() {
-		// Override get(Own)PropertyNames and get(Own)PropertyDescriptors to hide SECRET_KEY.
+		configureStorage = function configureStorage(storeGenerator) {
+			if (typeof storeGenerator != 'function')
+				throw new TypeError('Function expected for argument `storeGenerator`.');
+			createStore = storeGenerator;
+			return createStore;
+		},
 
-		var overrides = create(null);
+		createCoupler = function createCoupler() {
 
-		overrides.getOwnPropertyNames = getOwnPropertyNames
-		if (getPropertyNames) overrides.getPropertyNames = getPropertyNames;
+			var store = createStore();
 
-		keys(overrides).forEach(function(u) {
-			var original = overrides[u];
-			defineProperty(Object, u, {
-				value: function(obj) {
-					var names = apply(original, this, arguments);
-					if (u === 'getOwnPropertyNames' && !hasOwn(obj, SECRET_KEY))
-						return names;
-					var index = ArrayIndexOf(names, SECRET_KEY);
-					if (~index)
-						splice(names, index, 1);
-					return names;
-				},
-				enumerable: false,
-				writable: true,
-				configurable: true
-			});
-		});
-
-		overrides = create(null);
-
-		if (getPropertyDescriptors) overrides.getPropertyDescriptors = getPropertyDescriptors;
-		if (getOwnPropertyDescriptors) overrides.getOwnPropertyDescriptors = getOwnPropertyDescriptors;
-
-		keys(overrides).forEach(function(u) {
-			var original = overrides[u];
-			defineProperty(Object, u, {
-				value: function(obj) {
-					var desc = apply(original, this, arguments);
-					delete desc[SECRET_KEY];
-					return desc;
-				},
-				enumerable: false,
-				writable: true,
-				configurable: true
-			});
-		});
-
-	})();
-
-	// Override functions which prevent extensions on objects to go ahead and add a secret map first.
-	[ 'preventExtensions', 'seal', 'freeze' ].forEach(function(u) {
-		var original = Object[u];
-		defineProperty(Object, u, {
-			value: function(obj) {
-				// Define the secret map.
-				Secrets(obj);
-				return apply(original, this, arguments);
-			}
-		});
-	});
-
-	if (typeof _Proxy == 'function') {
-
-		Proxy = (function() {
-			/* TODO: This works for "direct_proxies", the current ES6 draft; however, some browsers have
-			 * support for an old draft (such as FF 17 and below) which uses Proxy.create(). Should this
-			 * version be overridden to protect against discovery of SECRET_KEY on these browsers also?
-			 */
-
-			var trapBypasses = create(null);
-			trapBypasses.defineProperty = _defineProperty;
-			trapBypasses.hasOwn = hasOwn;
-			trapBypasses.get = function(target, name) { return target[name]; };
-
-			return function Proxy(target, traps) {
-
-				if (!(this instanceof Proxy)) {
-					// TODO: The new keyword wasn't used. What should be done?
-					return new Proxy(target, traps);
+			return function coupler(obj) {
+				var S = store.get(obj),
+					proto, protoS, protoSTest;
+				if (!S) {
+					proto = getPrototypeOf(obj);
+					store.set(obj, S = create(proto ? coupler(proto) : null));
+				} else if (protoIsMutable) {
+					proto = getPrototypeOf(obj);
+					protoS = getPrototypeOf(S);
+					protoSTest = proto == null ? null : coupler(proto);
+					// If the prototype on the object has changed, then change the secret's
+					// prototype to reflect this.
+					if (protoSTest !== protoS)
+						try {
+							setPrototypeOf(S, protoSTest);
+						} catch(x) {
+							// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
+							// the spec goes in the direction it is currently expected to go [1], this should
+							// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
+							// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
+							// There are some other possible non-complaint reasons this path could be taken which
+							// come from pre-ES6 era `__proto__` inconsistencies in browsers.
+							// The fallback is to generate a new object which has the same properties as `S` and
+							// then return that.  This is a little hacky because we don't actually end up preserving
+							// object identity across the same secrets, and it could cause certain situations to
+							// break, such as using secrets as keys in a WeakMap, or some other place where object
+							// identity of secrets matters.  However, it is so unlikely that the two conditions
+							// necessary to cause problems here will occur together (since both are by themselves
+							// edge-case scenarios), we are happy enough with this solution, since it is the best
+							// we can do given the direction ES6 is going.
+							// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
+							store.set(S = mixin(create(protoSTest), S));
+						}
 				}
-
-				var _traps = create(traps);
-
-				forEach(keys(trapBypasses), function(trapName) {
-					var bypass = trapBypasses[trapName];
-					if (typeof traps[trapName] == 'function') {
-						// Override traps which could discover SECRET_KEY.
-						_traps[trapName] = function(target, name) {
-							if (name === SECRET_KEY) {
-								// Bypass any user defined trap when name === SECRET_KEY.
-								return apply(bypass, null, arguments);
-							}
-							return apply(traps[trapName], this, arguments);
-						};
-					}
-				});
-
-				return new _Proxy(target, _traps);
+				return S;
 			};
 
-		})();
+		};
 
-	} else if (_Proxy && _Proxy.create) {
-
-//		Proxy.create = (function() {
-//
-//			return function create(traps, proto) {
-//				// TODO
-//			};
-//
-//		})();
-
-	}
-	
 	return {
-		create: function createSecret() {
-
-			var id = nextUniqueId();
-
-			return function secret(obj) {
-				var secrets = Secrets(obj),
-					S, proto, protoS, protoSTest;
-				if (secrets) {
-					S = secrets[id];
-					if (!S) {
-						proto = getPrototypeOf(obj);
-						secrets[id] = S = create(proto ? secret(proto) : null);
-					} else if (protoIsMutable) {
-						// The prototype on the object changed. Change the secret's
-						// prototype to reflect this.
-						proto = getPrototypeOf(obj);
-						protoS = getPrototypeOf(S);
-						protoSTest = proto == null ? null : secret(proto);
-						if (protoSTest !== protoS)
-							try {
-								setPrototypeOf(S, protoSTest);
-							} catch(x) {
-								// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
-								// the spec goes in the direction it is currently expected to go [1], this should
-								// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
-								// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
-								// There are some other possible non-complaint reasons this path could be taken which
-								// come from pre-ES6 era `__proto__` inconsistencies in browsers.
-								// The fallback is to generate a new object which has the same properties as `S` and
-								// then return that.  This is a little hacky because we don't actually end up preserving
-								// object identity across the same secrets, and it could cause certain situations to
-								// break, such as using secrets as keys in a WeakMap, or some other place where object
-								// identity of secrets matters.  However, it is so unlikely that the two conditions
-								// necessary to cause problems here will occur together (since both are by themselves
-								// edge-case scenarios), we are happy enough with this solution, since it is the best
-								// we can do given the direction ES6 is going.
-								// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
-								secrets[id] = create(protoSTest);
-								S = mixin(secrets[id], S);
-							}
-					}
-					return S;
-				} else {
-					// The object may have been frozen in another frame.
-					locked = true;
-					throw new Error('This object doesn\'t support secrets.');
-				}
-			};
-
-		}
+		configureStorage: configureStorage,
+		create: createCoupler
 	};
 
-	function Secrets(O) {
-		// Returns undefined if object doesn't already have Secrets and the object is non-extensible. This should
-		// really only happen if an object is passed in from another frame, because in this frame preventExtensions
-		// is overridden to add a Secrets property first.
+})();
+var WeakKeyedStoreFactory = (function() {
 
-		if (O !== Object(O)) {
+	var locked = true,
+		valid = false,
+
+		// ES6? TODO: Keep up with this.
+		getPropertyNames = Object.getPropertyNames,
+		getPropertyDescriptors = Object.getPropertyDescriptors,
+		getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors,
+		_Proxy = typeof Proxy == 'undefined' ? undefined : Proxy,
+
+		MIN_PRECISION = -Math.pow(2, 53),
+		MAX_PRECISION = -MIN_PRECISION,
+		// idNum will ensure identifiers are unique.
+		idNum = (function() {
+			// Use an Array-like rather than a true array to protect against setters defined on Array.prototype indices.
+			var idNum = create(null);
+			idNum[0] = MIN_PRECISION;
+			idNum.length = 1;
+			return idNum;
+		})(),
+
+		random = getRandomGenerator(),
+
+		PARALLEL_KEY = '||:' + getIdentifier();
+
+	function StoreGet(obj, parallelId) {
+		if (Object(obj) !== obj)
+			throw new TypeError('Object expected for `obj`. Received "' + obj + '"');
+		var P = getParallels(obj);
+		return P[parallelId];
+	}
+
+	function StoreSet(obj, parallelId, value) {
+		if (Object(obj) !== obj)
+			throw new TypeError('Object expected for `obj`. Received "' + obj + '"');
+		var P = getParallels(obj);
+		return P[parallelId] = value;
+	}
+
+	function getParallels(obj) {
+
+		var D = getOwnPropertyDescriptor(obj, PARALLEL_KEY),
+			F, P;
+
+		if (!D)
+			return setupParallels(obj);
+		else if (!hasOwn(D, 'value') || typeof D.value != 'function')
+			throw new Error('Parallel object support has been compromised.');
+
+		F = D.value;
+		
+		locked = false;
+		try {
+			P = F();
 			locked = true;
-			throw new Error('Not an object: ' + O);
+		} catch(x) {
+			locked = true;
+			valid = false;
+			throw new Error('Parallel object support has been compromised');
 		}
 
-		if (!hasOwn(O, SECRET_KEY)) {
-			if (!isExtensible(O)) return;
-			defineProperty(O, SECRET_KEY, {
+		if (!valid)
+			throw new Error('Parallel object support has been compromised');
+		valid = false;
 
-				get: (function() {
-					var secretMap = create(null);
-					return function getSecret() {
-						// The lock protects against retrieval in the event that the SECRET_KEY is discovered.
-						if (locked) return;
-						locked = true;
-						return secretMap;
-					};
-				})(),
-
-				enumerable: false,
-				configurable: false
-
-			});
-		}
-
-		locked = false;	
-		return O[SECRET_KEY];
+		return P;
 
 	}
 
-	function mixin(target, source) {
-		forEach(getOwnPropertyNames(source), function(name) {
-			defineProperty(target, name, getOwnPropertyDescriptor(source, name));
+	function setupParallels(obj) {
+		var P = create(null);
+		define(obj, PARALLEL_KEY, {
+			value: function() {
+				if (locked) {
+					valid = false;
+					throw new Error('Parallel object locked.');
+				}
+				valid = true;
+				locked = true;
+				return P;
+			},
+			enumerable: false,
+			writable: false,
+			configurable: false
 		});
-		return target;
+		return P;
 	}
 
-	function getIdentifier() {
-		return preIdentifier + ':' + join(getRandStrs(8, 11), '/') + ':' + nextUniqueId();
+	function getRandStrs(count, length) {
+		var r = create(null);
+		r.length = 0;
+		for(var i = 0; i < count; i++) {
+			push(r, getRandStr(length));
+		}
+		return r;
+	}
+
+	function getRandStr(length) {
+		var s = '';
+		for (var i = 0; i < length; i++) {
+			s += encodeStr(random() * (125 - 65 + 1));
+		}
+		return s;
+	}
+
+	function encodeStr(num) {
+		return fromCharCode(num + 65);
 	}
 
 	function nextUniqueId() {
@@ -361,25 +313,20 @@ var Secrets = (function(Object, String) {
 		return '{' + join(idNum, ',') + '}';
 	}
 
-	function encodeStr(num) {
-		return fromCharCode(num + 65);
+	function createStore() {
+		var store = create(null),
+			id = nextUniqueId();
+		store.get = function(key) {
+			return StoreGet(key, id);
+		};
+		store.set = function(key, value) {
+			return StoreSet(key, id, value);
+		};
+		return freeze(store);
 	}
 
-	function getRandStrs(count, length) {
-		var r = create(null);
-		r.length = 0;
-		for(var i = 0; i < count; i++) {
-			push(r, randStr(length));
-		}
-		return r;
-	}
-
-	function randStr(length) {
-		var s = '';
-		for (var i = 0; i < length; i++) {
-			s += encodeStr(random() * (125 - 65 + 1));
-		}
-		return s;
+	function getIdentifier() {
+		return getRandStr(7) + '1:' + join(getRandStrs(8, 11), '/') + ':' + nextUniqueId();
 	}
 
 	function getRandomGenerator() {
@@ -399,7 +346,7 @@ var Secrets = (function(Object, String) {
 		}
 		if (typeof getRandomValues == 'function' && typeof Uint8Array == 'function') {
 			return (function() {
-				var values = new Uint8Array(4), index = 4;
+				var values = new Uint8Array(16), index = values.length;
 				return function random() {
 					if (index >= values.length) {
 						getRandomValues(values);
@@ -411,33 +358,162 @@ var Secrets = (function(Object, String) {
 		} else return Math.random;
 	}
 
-	// We only want to define with own properties of the descriptor.
-	function defineProperty(obj, name, desc) {
-		if ('value' in desc && !hasOwn(desc, 'value')
-			|| 'get' in desc && !hasOwn(desc, 'get')
-			|| 'set' in desc && !hasOwn(desc, 'set')
-			|| 'enumerable' in desc && !hasOwn(desc, 'enumerable')
-			|| 'writable' in desc && !hasOwn(desc, 'writable')
-			|| 'configurable' in desc && !hasOwn(desc, 'configurable'))
-			desc = safeDescriptor(desc);
-		return _defineProperty(obj, name, desc);
+	(function() {
+		// Override get(Own)PropertyNames and get(Own)PropertyDescriptors to hide PARALLEL_KEY.
+
+		var overrides = create(null);
+
+		overrides.getOwnPropertyNames = getOwnPropertyNames
+		if (getPropertyNames) overrides.getPropertyNames = getPropertyNames;
+
+		keys(overrides).forEach(function(u) {
+			var original = overrides[u];
+			define(Object, u, {
+				value: function(obj) {
+					var names = apply(original, this, arguments);
+					if (u === 'getOwnPropertyNames' && !hasOwn(obj, PARALLEL_KEY))
+						return names;
+					var index = ArrayIndexOf(names, PARALLEL_KEY);
+					if (~index)
+						splice(names, index, 1);
+					return names;
+				},
+				enumerable: false,
+				writable: true,
+				configurable: true
+			});
+		});
+
+		overrides = create(null);
+
+		if (getPropertyDescriptors) overrides.getPropertyDescriptors = getPropertyDescriptors;
+		if (getOwnPropertyDescriptors) overrides.getOwnPropertyDescriptors = getOwnPropertyDescriptors;
+
+		keys(overrides).forEach(function(u) {
+			var original = overrides[u];
+			define(Object, u, {
+				value: function(obj) {
+					var desc = apply(original, this, arguments);
+					delete desc[PARALLEL_KEY];
+					return desc;
+				},
+				enumerable: false,
+				writable: true,
+				configurable: true
+			});
+		});
+
+	})();
+
+	// Override functions which prevent extensions on objects to go ahead and add a parallel map first.
+	[ 'preventExtensions', 'seal', 'freeze' ].forEach(function(u) {
+		var original = Object[u];
+		define(Object, u, {
+			value: function(obj) {
+				setupParallels(obj);
+				return apply(original, this, arguments);
+			}
+		});
+	});
+
+	if (typeof _Proxy == 'function')
+		Proxy = (function() {
+			/* TODO: This works for "direct_proxies", the current ES6 draft; however, some browsers have
+			 * support for an old draft (such as FF 17 and below) which uses Proxy.create(). Should this
+			 * version be overridden to protect against discovery of PARALLEL_KEY on these browsers also?
+			 */
+
+			var trapBypasses = create(null);
+			trapBypasses.defineProperty = Object.defineProperty;
+			trapBypasses.hasOwn = hasOwn;
+			trapBypasses.get = function(target, name) { return target[name]; };
+
+			return function Proxy(target, traps) {
+
+				if (!(this instanceof Proxy)) {
+					// TODO: The new keyword wasn't used. What should be done?
+					return new Proxy(target, traps);
+				}
+
+				var _traps = create(traps);
+
+				forEach(keys(trapBypasses), function(trapName) {
+					var bypass = trapBypasses[trapName];
+					if (typeof traps[trapName] == 'function') {
+						// Override traps which could discover PARALLEL_KEY.
+						_traps[trapName] = function(target, name) {
+							if (name === PARALLEL_KEY) {
+								// Bypass any user defined trap when name === PARALLEL_KEY.
+								return apply(bypass, null, arguments);
+							}
+							return apply(traps[trapName], this, arguments);
+						};
+					}
+				});
+
+				return new _Proxy(target, _traps);
+			};
+
+		})();
+	else if (_Proxy && _Proxy.create) {
+
+//		Proxy.create = (function() {
+//
+//			return function create(traps, proto) {
+//				// TODO
+//			};
+//
+//		})();
+
 	}
 
-	function safeDescriptor(obj) {
-		if (obj == null) {
-			locked = true;
-			throw new TypeError('Argument cannot be null or undefined.');
+	return {
+		create: createStore
+	};
+
+})();
+var WeakMapStoreFactory = (function(WeakMap) {
+
+	if (WeakMap === undefined)
+		return;
+
+	var WeakMapGet = lazyBind(WeakMap.prototype.get),
+		WeakMapSet = lazyBind(WeakMap.prototype.set);
+
+	return {
+		create: function createStore() {
+			var wm = new WeakMap(),
+				store = create(null);
+			store.get = function(key) {
+				return WeakMapGet(wm, key);
+			};
+			store.set = function(key, value) {
+				return WeakMapSet(wm, key, value);
+			};
+			return freeze(store);
 		}
-		obj = Object(obj);
-		var O = create(null),
-			k = keys(obj);
-		for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
-			O[key] = obj[key];
-		return O;
-	}
+	};
 
-// We pass in Object and String to ensure that they cannot be changed later to something else.
-})(Object, String);
+})(typeof WeakMap == 'function' ? WeakMap : undefined);
 
-if (typeof exports != 'undefined' && exports != null)
-	exports.createSecret = createSecret;
+	var storageGenerators = {
+			'WeakMap': WeakMapStoreFactory.create,
+			'WeakKeyedStore': WeakKeyedStoreFactory.create
+		},
+
+		storageGenerator = storageGenerators[storageType];
+
+	if (!storageGenerator)
+		throw new TypeError('Storage configuration not found for storage type "' + STORAGE_TYPE + '".');
+
+	CouplerFactory.configureStorage(storageGenerator);
+
+	return {
+		create: function() {
+			var coupler = CouplerFactory.create();
+			coupler.toString = function() { return 'function [Secret Coupler]'; };
+			return coupler;
+		}
+	};
+
+})(Object, String, Error, TypeError);
