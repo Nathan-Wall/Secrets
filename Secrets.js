@@ -2,7 +2,7 @@ var Secrets = (function(Object, String, Error, TypeError) {
 
 	'use strict';
 
-	var storageType = 'WeakKeyedStore',
+	var INITIAL_STORAGE_TYPE = 'WeakKeyedStore',
 
 		// We capture the built-in functions and methods as they are now and store them as references so that we can
 		// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
@@ -58,10 +58,10 @@ var Secrets = (function(Object, String, Error, TypeError) {
 		})(Object.defineProperty);
 
 	var CouplerFactory = (function() {
-
-	var create = Object.create,
-
-		createStore,
+	
+	var createStore = function() {
+			throw new Error('No store has been configured.');
+		},
 
 		mixin = function mixin(target, source) {
 			forEach(getOwnPropertyNames(source), function(name) {
@@ -83,41 +83,27 @@ var Secrets = (function(Object, String, Error, TypeError) {
 			if (!protoIsMutable)
 				return;
 
-			// TODO: Keep up with the development of the ES6 spec, and revise if possible.
-			return function() {
-				locked = true;
-				throw new Error(
-					'Support for mutable prototype with Secrets has been disabled due to the appearance that '
-					+ 'mutable prototype won\'t be supported in ES6 for objects which don\'t inherit from Object.prototype.'
-				);
-			};
-
-			// It is believed the spec will allow the setter on `__proto__` to work on any object form the same realm [1].
-			// This should allow us to keep up with changing prototypes in the vast majority of cases since all secret
-			// objects will be created in a single realm, no matter what realm the original object is from which the
-			// secrets belong to.  There is a possibility of breakage if `__proto__` is deleted from this realm but
-			// not others, in which case objects in other realms would be allowed to mutate `__proto__` while secrets
-			// in this realm based on those objects would not.
-			// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
+			// It is now believed ES6 will allow the setter on `__proto__` to work on any object form any realm.
 			var protoDesc = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__'),
 				_setProto = protoDesc && protoDesc.set;
-			if (_setProto)
+			if (typeof _setProto == 'function')
 				return lazyBind(_setProto);
 
 			// If the implementation supports mutable proto but doesn't have a __proto__ setter, see if
 			// mutable proto is possible on objects which don't inherit from Object.prototype.
-			// This behavior has been observed on Chrome 25 but is believed to be fixed on a modern V8.
+			// This behavior has been observed on Chrome 25-27 but is believed to be fixed on a later V8.
 			// https://mail.mozilla.org/pipermail/es-discuss/2013-March/029244.html
 			// However, the version of V8 mentioned in the above post does not support __proto__ setter.
 			// It is believed a later version of V8 will support a __proto__ setter, but for interim
 			// implementations it may be impossible to mutate [[Prototype]] on an object which doesn't
 			// inherit from `Object.prototype`.
-			// It is also currently unknown which direction the spec will go on this issue.
 			var A = create(null),
 				B = create(null);
 			A.test = 5;
-			B.__proto__ = A;
-			if (B.test == 5)
+			try {
+				B.__proto__ = A;
+			} catch(x) { }
+			if (B.test === 5)
 				return function(obj, proto) {
 					obj.__proto__ = proto;
 				};
@@ -126,7 +112,7 @@ var Secrets = (function(Object, String, Error, TypeError) {
 				locked = true;
 				throw new Error(
 					'Mutable prototype is supported by this implementation, but it does not support mutating the prototype '
-					+ 'of an object which doesn\'t inherit from Object.prototype'
+					+ 'of an object which doesn\'t inherit from Object.prototype.'
 				);
 			};
 
@@ -159,12 +145,13 @@ var Secrets = (function(Object, String, Error, TypeError) {
 						try {
 							setPrototypeOf(S, protoSTest);
 						} catch(x) {
-							// This could occur under unusal circumstances. For ES6 compliant browsers, assuming
-							// the spec goes in the direction it is currently expected to go [1], this should
-							// only happen if `__proto__` is deleted from this realm but exists in `obj`'s realm,
-							// allowing `obj`'s prototype to mutate but preventing `S`'s prototype from mutating.
-							// There are some other possible non-complaint reasons this path could be taken which
-							// come from pre-ES6 era `__proto__` inconsistencies in browsers.
+							// This could occur under some circumstances. For ES6 compliant implementations, it should not
+							// occur (assuming the __proto__ setter is allowed to work cross-realm, as is expected).
+							// Likewise, in ES5 implementations without the __proto__ extension, there's no problem because
+							// mutable proto is not supported.
+							// However, many of the ES5 browsers which have the __proto__ extension have implemented it in
+							// ways that may not provide a __proto__ setter or may not support cross-realm setting or setting
+							// on objects which don't inherit from Object.prototype.
 							// The fallback is to generate a new object which has the same properties as `S` and
 							// then return that.  This is a little hacky because we don't actually end up preserving
 							// object identity across the same secrets, and it could cause certain situations to
@@ -173,7 +160,6 @@ var Secrets = (function(Object, String, Error, TypeError) {
 							// necessary to cause problems here will occur together (since both are by themselves
 							// edge-case scenarios), we are happy enough with this solution, since it is the best
 							// we can do given the direction ES6 is going.
-							// [1] https://mail.mozilla.org/pipermail/es-discuss/2013-April/029724.html
 							store.set(S = mixin(create(protoSTest), S));
 						}
 				}
@@ -496,25 +482,34 @@ var WeakMapStoreFactory = (function(WeakMap) {
 
 })(typeof WeakMap == 'function' ? WeakMap : undefined);
 
-	var storageGenerators = {
-			'WeakMap': WeakMapStoreFactory.create,
-			'WeakKeyedStore': WeakKeyedStoreFactory.create
-		},
+	return (function() {
 
-		storageGenerator = storageGenerators[storageType];
+		var storageGenerators = create(null);
+		storageGenerators.WeakKeyedStore = WeakKeyedStoreFactory.create
+		if (WeakMapStoreFactory)
+			storageGenerators.WeakMap = WeakMapStoreFactory.create;
 
-	if (!storageGenerator)
-		throw new TypeError('Storage configuration not found for storage type "' + STORAGE_TYPE + '".');
+		configureStorage(INITIAL_STORAGE_TYPE);
 
-	CouplerFactory.configureStorage(storageGenerator);
+		function configureStorage(storageType) {
+			var storageGenerator = storageGenerators[storageType];
+			if (!storageGenerator)
+				throw new TypeError('Storage configuration not found for storage type "' + storageType + '".');
+			CouplerFactory.configureStorage(storageGenerator);
+		}
 
-	return {
-		create: function() {
+		function create() {
 			var coupler = CouplerFactory.create();
-			coupler.toString = function() { return 'function [Secret Coupler]'; };
+			coupler.toString = function() { return 'function SecretCoupler(object) { return secret; }'; };
 			return coupler;
 		}
-	};
+
+		return {
+			create: create,
+			configureStorage: configureStorage
+		};
+
+	})();
 
 })(Object, String, Error, TypeError);
 
