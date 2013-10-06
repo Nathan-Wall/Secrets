@@ -1,0 +1,22 @@
+{
+  "name": "priv",
+  "version": "0.1.1",
+  "description": "Can be used to tie \"private\" properties to objects in JavaScript.",
+  "main": "Secrets.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/Nathan-Wall/Secrets.git"
+  },
+  "keywords": [
+    "Secrets",
+    "private",
+    "encapsulation"
+  ],
+  "author": "Nathan Wall",
+  "license": "open source",
+  "gitHead": "c8dd04b3eb0052465c6dae74b875dbb44001750a",
+  "readmeFilename": "README.md"
+}
