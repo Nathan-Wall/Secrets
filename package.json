@@ -1,6 +1,6 @@
 {
   "name": "priv",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Can be used to tie \"private\" properties to objects in JavaScript.",
   "main": "Secrets.js",
   "scripts": {
@@ -17,6 +17,5 @@
   ],
   "author": "Nathan Wall",
   "license": "open source",
-  "gitHead": "c8dd04b3eb0052465c6dae74b875dbb44001750a",
   "readmeFilename": "README.md"
 }
