@@ -1,14 +1,14 @@
 # Secrets
 
-# Getting Started
+## Getting Started
 
-## Node
+### Node
 
-### Installation
+#### Installation
 
     npm install priv
 
-### Initialization
+#### Initialization
 
 The `priv` module exports a function which when called will initialize a secret generator and return it.  A common set up would be to have a `secrets.js` file in your project that is shared by all modules.
 
@@ -27,9 +27,9 @@ Now you can use this secret generator instance across your project:
 
 (See *Usage* below for more information.)
 
-## Browser
+### Browser
 
-### Basic
+#### Basic
 
 Download `Secrets.js` and serve it in a `<script>` tag.  Then initialize a secret generator by calling the `Secrets` function.
 
@@ -40,7 +40,7 @@ Download `Secrets.js` and serve it in a `<script>` tag.  Then initialize a secre
 
 Inside another script, you can use `secrets.create()` to create a secret coupler (see below).
 
-### AMD
+#### AMD
 
 It's also possible to import Secrets as an AMD module.  A common set up would be to define a globally-accessible secret generator instance.
 
@@ -55,7 +55,7 @@ It's also possible to import Secrets as an AMD module.  A common set up would be
         // ...
     });
 
-# Usage
+## Usage
 
 Secrets can be used to tie "private" properties to objects in JavaScript.  Use `Secrets.create` to create a **secret coupler**, a function which can be used to attach private properties to an object.
 
