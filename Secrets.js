@@ -2,6 +2,9 @@
 
 	'use strict';
 
+	if (Object(global) !== global)
+		throw new Error('Expected global object');
+
 	var DEFAULT_STORAGE_TYPE = 'WeakKeyedStore';
 
 	function Secrets(config) {
@@ -528,7 +531,11 @@ var WeakMapStoreFactory = (function(WeakMap) {
 		module.exports = Secrets;
 
 	// Export for AMD
-	if (typeof global.define == 'function' && global.define.amd)
+	else if (global && typeof global.define == 'function' && global.define.amd)
 		global.define(function() { return Secrets; });
+
+	// Export as a global
+	else
+		global.Secrets = Secrets;
 
 })(typeof global == 'undefined' || Object(global) !== global ? this : global, Object, String, Error, TypeError);
