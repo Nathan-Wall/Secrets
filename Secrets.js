@@ -1,10 +1,10 @@
-var priv = (function(Object, String, Error, TypeError) {
+(function(global, Object, String, Error, TypeError) {
 
 	'use strict';
 
 	var DEFAULT_STORAGE_TYPE = 'WeakKeyedStore';
 
-	return function priv(config) {
+	function Secrets(config) {
 
 		if (config === undefined) {
 			config = Object.create(null);
@@ -521,10 +521,14 @@ var WeakMapStoreFactory = (function(WeakMap) {
 
 		})();
 
-	};
+	}
 
-})(Object, String, Error, TypeError);
+	// Export for Node.
+	if (typeof module == 'object' && typeof module.exports == 'object')
+		module.exports = Secrets;
 
-// Export for Node.
-if (typeof module == 'object' && typeof module.exports == 'object')
-	module.exports = priv;
+	// Export for AMD
+	if (typeof global.define == 'function' && global.define.amd)
+		global.define(function() { return Secrets; });
+
+})(typeof global == 'undefined' || Object(global) !== global ? this : global, Object, String, Error, TypeError);
