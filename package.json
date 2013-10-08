@@ -1,6 +1,6 @@
 {
   "name": "priv",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Can be used to tie \"private\" properties to objects in JavaScript.",
   "main": "Secrets.js",
   "scripts": {
