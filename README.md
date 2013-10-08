@@ -1,5 +1,7 @@
 # Secrets
 
+Secrets can be used to tie "private" properties to objects in JavaScript.  Use `Secrets.create` to create a **secret coupler**, a function which can be used to attach private properties to an object.
+
 ## Getting Started
 
 ### Node
@@ -56,8 +58,6 @@ It's also possible to import Secrets as an AMD module.  A common set up would be
     });
 
 ## Usage
-
-Secrets can be used to tie "private" properties to objects in JavaScript.  Use `Secrets.create` to create a **secret coupler**, a function which can be used to attach private properties to an object.
 
     var S = secrets.create();
     
