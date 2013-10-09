@@ -27,7 +27,7 @@ Now you can use this secret generator instance across your project:
 
     // ...
 
-(See *Usage* below for more information.)
+(See **Usage** below for more information.)
 
 ### Browser
 
@@ -164,6 +164,8 @@ You may specify configuration options when you initialize the secret generator b
     });
 
 #### inherit
+
+Ths option is also available when intializing the secret generator.  In this case, it sets the default, but the default can be overridden by options passed to `secret.create`.
 
     var secretsA = Secrets({ inherit: true }),
         secretsB = Secrets({ inherit: false });
