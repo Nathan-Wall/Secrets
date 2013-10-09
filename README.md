@@ -120,3 +120,69 @@ Using secrets in this way allows class-private variables.  This means two instan
 
     P.add(Q);
     P.getCoords(); // => "-2,11"
+
+## Advanced Configuration
+
+You may specify configuration options either when you initialize the secret generator or when you create the secret coupler.
+
+### Configuring the Secret Coupler
+
+There are some configuration options available  when creating a secret coupler (`secrets.create`).  The following options are available:
+
+#### inherit
+
+The `inherit` flag determines whether the private data added to objects should be inherited through prototypal inheritance.  By default, `inherit` is `true`.
+
+    var secrets = Secrets();
+
+    var A = secrets.create({ inherit: true }),
+        B = secrets.create({ inherit: false });
+
+    var x = Object.create(null),
+        // y inherits from x
+        y = Object.create(x);
+
+    A(x).foo = 'bar';
+    // The foo property is inherited because secretsA is configured to inherit.
+    A(y).foo; // => 'bar'
+
+    B(x).baz = 'bar';
+    // The baz property is *not* inherited because secretsB is configured to *not* inherit.
+    B(y).baz; // => undefined
+
+#### storeGenerator
+
+The `storeGenerator` option is available.  This option is only for very advanced users who have particular needs.  Most people shouldn't need this option, and there's no documentation for how to use this option.  (It would needlessly take up space in this README.)  If you want a little bit of flexibility over how data is stored, see the `storageType` option below.
+
+### Configuring Defaults
+
+You may specify configuration options when you initialize the secret generator by passing in an object of configuration properties.
+
+    var secrets = Secrets({
+        storageType: 'WeakMap',
+        inherit: false
+    });
+
+#### inherit
+
+    var secretsA = Secrets({ inherit: true }),
+        secretsB = Secrets({ inherit: false });
+
+    var A = secretsA.create(),
+        B = secretsB.create();
+
+    var x = Object.create(null),
+        // y inherits from x
+        y = Object.create(x);
+
+    A(x).foo = 'bar';
+    // The foo property is inherited because secretsA is configured to inherit.
+    A(y).foo; // => 'bar'
+
+    B(x).baz = 'bar';
+    // The baz property is *not* inherited because secretsB is configured to *not* inherit.
+    B(y).baz; // => undefined
+
+#### storageType
+
+There are currently two available storage types: `'WeakKeyedStore'` and `'WeakMap'`.  `'WeakKeyedStore'` is default.  The `'WeakMap'` requires the environment to support ES6 WeakMaps.  There is discernable difference in the semantics of Secrets between the two storage options.  A WeakMap store may be better performance when it's available, though it may not be.  No performance tests have been run.

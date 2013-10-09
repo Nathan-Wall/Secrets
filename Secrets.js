@@ -1,4 +1,4 @@
-(function(global, Object, String, Error, TypeError) {
+(function(global, Object, String, Boolean, Error, TypeError) {
 
 	'use strict';
 
@@ -15,9 +15,7 @@
 			throw new TypeError('Object expected');
 		}
 
-		var storageType = 'storageType' in config ? String(config.storageType) : DEFAULT_STORAGE_TYPE,
-
-			// We capture the built-in functions and methods as they are now and store them as references so that we can
+		var // We capture the built-in functions and methods as they are now and store them as references so that we can
 			// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
 			// details about or alter the secrets stored on an object.
 			lazyBind = Function.prototype.bind.bind(Function.prototype.call),
@@ -68,11 +66,16 @@
 						O[key] = obj[key];
 					return O;
 				}
-			})(Object.defineProperty);
+			})(Object.defineProperty),
+
+			storageType = getConfig(config, 'storageType', String, DEFAULT_STORAGE_TYPE),
+			inherit = getConfig(config, 'inherit', Boolean, true);
 
 		var CouplerFactory = (function() {
 	
-	var createStore = function() {
+	var inheritDefault = true,
+
+		storeGenerator = function() {
 			throw new Error('No store has been configured.');
 		},
 
@@ -131,24 +134,34 @@
 
 		})(),
 
-		configureStorage = function configureStorage(storeGenerator) {
-			if (typeof storeGenerator != 'function')
-				throw new TypeError('Function expected for argument `storeGenerator`.');
-			createStore = storeGenerator;
-			return createStore;
+		assertFunction = function assertFunction(f) {
+			if (typeof f != 'function')
+				throw new TypeError('Function expected');
+			return f;
 		},
 
-		createCoupler = function createCoupler() {
+		configureStorage = function configureStorage(storeGen) {
+			return storeGenerator = assertFunction(storeGen);
+		},
 
-			var store = createStore();
+		configureInheritance = function configureInheritance(tf) {
+			inheritDefault = tf;
+		},
+
+		createCoupler = function createCoupler(config) {
+
+			var createStore = getConfig(config, 'storeGenerator', assertFunction, storeGenerator),
+				inherit = getConfig(config, 'inherit', Boolean, inheritDefault),
+				
+				store = createStore();
 
 			return function coupler(obj) {
 				var S = store.get(obj),
 					proto, protoS, protoSTest;
 				if (!S) {
-					proto = getPrototypeOf(obj);
+					proto = inherit ? getPrototypeOf(obj) : null;
 					store.set(obj, S = create(proto ? coupler(proto) : null));
-				} else if (protoIsMutable) {
+				} else if (inherit && protoIsMutable) {
 					proto = getPrototypeOf(obj);
 					protoS = getPrototypeOf(S);
 					protoSTest = proto == null ? null : coupler(proto);
@@ -183,10 +196,22 @@
 
 	return {
 		configureStorage: configureStorage,
+		configureInheritance: configureInheritance,
 		create: createCoupler
 	};
 
 })();
+function getConfig(config, prop, coerce, defaultValue) {
+	var value;
+	if (config != null && hasOwn(config, prop)) {
+		value = config.prop;
+	}
+	if (value === undefined) {
+		value = defaultValue;
+	}
+	return coerce(value);
+}
+
 var WeakKeyedStoreFactory = (function() {
 
 	var locked = true,
@@ -503,12 +528,17 @@ var WeakMapStoreFactory = (function(WeakMap) {
 				storageGenerators.WeakMap = WeakMapStoreFactory.create;
 
 			configureStorage(storageType);
+			configureInheritance(inherit);
 
 			function configureStorage(storageType) {
 				var storageGenerator = storageGenerators[storageType];
 				if (!storageGenerator)
 					throw new TypeError('Storage configuration not found for storage type "' + storageType + '".');
 				CouplerFactory.configureStorage(storageGenerator);
+			}
+
+			function configureInheritance(tf) {
+				CouplerFactory.configureInheritance(tf);
 			}
 
 			function create() {
@@ -538,4 +568,4 @@ var WeakMapStoreFactory = (function(WeakMap) {
 	else
 		global.Secrets = Secrets;
 
-})(typeof global == 'undefined' || Object(global) !== global ? this : global, Object, String, Error, TypeError);
+})(typeof global == 'undefined' || Object(global) !== global ? this : global, Object, String, Boolean, Error, TypeError);
