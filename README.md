@@ -10,50 +10,26 @@ Secrets can be used to tie "private" properties to objects in JavaScript.  Use `
 
     npm install priv
 
-#### Initialization
+Then...
 
-The `priv` module exports a function which when called will initialize a secret generator and return it.  A common set up would be to have a `secrets.js` file in your project that is shared by all modules.
-
-    // secrets.js
-    var priv = require('priv'),
-        secrets = priv();
-    module.exports = secrets;
-
-Now you can use this secret generator instance across your project:
-
-    // In a module where you want to use secrets:
-    var secrets = require('./secrets'),
-        S = secrets.create();
-
+    var secrets = require('priv');
     // ...
-
-(See **Usage** below for more information.)
 
 ### Browser
 
 #### Basic
 
-Download `Secrets.js` and serve it in a `<script>` tag.  Then initialize a secret generator by calling the `Secrets` function.
+Download `secrets.js` and serve it in a `<script>` tag.
 
     <script type="text/javascript" src="path/to/secrets.js"></script>
-    <script type="text/javascript">
-        var secrets = Secrets();
-    </script>
 
-Inside another script, you can use `secrets.create()` to create a secret coupler (see below).
+This will export a global `secrets` object.  Inside another script, you can use `secrets.create()` to create a secret coupler (see below).
 
 #### AMD
 
-It's also possible to import Secrets as an AMD module.  A common set up would be to define a globally-accessible secret generator instance.
+It's also possible to import Secrets as an AMD module.
 
-    // In an initialization script...
-    define('secrets', [ 'path/to/secrets' ], function(Secrets) {
-        return Secrets();
-    });
-
-    // In a module where you want to use secrets...
-    require([ 'secrets' ], function(secrets) {
-        var S = secrets.create();
+    require([ 'path/to/secrets' ], function(secrets) {
         // ...
     });
 
@@ -123,11 +99,11 @@ Using secrets in this way allows class-private variables.  This means two instan
 
 ## Advanced Configuration
 
-You may specify configuration options either when you initialize the secret generator or when you create the secret coupler.
+You may specify configuration options either when you create the secret coupler or by initializing a new secrets generator.
 
 ### Configuring the Secret Coupler
 
-There are some configuration options available  when creating a secret coupler (`secrets.create`).  The following options are available:
+There are some configuration options available when creating a secret coupler (`secrets.create`).  The following options are available:
 
 #### inherit
 
@@ -156,19 +132,25 @@ The `storeGenerator` option is available.  This option is only for very advanced
 
 ### Configuring Defaults
 
-You may specify configuration options when you initialize the secret generator by passing in an object of configuration properties.
+You may specify configuration options by initializing a new secret generator and passing in an object of configuration properties.
 
-    var secrets = Secrets({
+    var secrets2 = secrets.configure({
         storageType: 'WeakMap',
         inherit: false
     });
 
+    // Later...
+    var S = secrets2.create();
+    // This secret will use a WeakMap storage type and not inherit
+
+Note that `secrets.configure` does **not** affect the configuration of the `secrets` object it is called on; rather it returns a new secrets object which can be used to create secret couplers using the specified configuration.
+
 #### inherit
 
-Ths option is also available when intializing the secret generator.  In this case, it sets the default, but the default can be overridden by options passed to `secret.create`.
+Ths option is also available when intializing a secret generator.  In this case, it sets the default, but the default can be overridden by options passed to `secret.create`.
 
-    var secretsA = Secrets({ inherit: true }),
-        secretsB = Secrets({ inherit: false });
+    var secretsA = secrets.configure({ inherit: true }),
+        secretsB = secrets.configure({ inherit: false });
 
     var A = secretsA.create(),
         B = secretsB.create();
@@ -187,4 +169,4 @@ Ths option is also available when intializing the secret generator.  In this cas
 
 #### storageType
 
-There are currently two available storage types: `'WeakKeyedStore'` and `'WeakMap'`.  `'WeakKeyedStore'` is default.  The `'WeakMap'` requires the environment to support ES6 WeakMaps.  There is discernable difference in the semantics of Secrets between the two storage options.  A WeakMap store may be better performance when it's available, though it may not be.  No performance tests have been run.
+There are currently two available storage types: `'WeakKeyedStore'` and `'WeakMap'`.  `'WeakKeyedStore'` is default.  The `'WeakMap'` requires the environment to support ES6 WeakMaps.  There is no discernable difference in the semantics of Secrets between the two storage options.  A WeakMap store may be better performance when it's available, though it may not be.  No performance tests have been run.

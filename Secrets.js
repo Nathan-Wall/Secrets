@@ -5,73 +5,116 @@
 	if (Object(global) !== global)
 		throw new Error('Expected global object');
 
-	var DEFAULT_STORAGE_TYPE = 'WeakKeyedStore';
+	var DEFAULT_STORAGE_TYPE = 'WeakKeyedStore',
 
-	function Secrets(config) {
+		// We capture the built-in functions and methods as they are now and store them as references so that we can
+		// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
+		// details about or alter the secrets stored on an object.
+		lazyBind = Function.prototype.bind.bind(Function.prototype.call),
 
-		if (config === undefined) {
-			config = Object.create(null);
-		} else if (Object(config) !== config) {
-			throw new TypeError('Object expected');
-		}
+		create = Object.create,
+		getPrototypeOf = Object.getPrototypeOf,
+		keys = Object.keys,
+		getOwnPropertyNames = Object.getOwnPropertyNames,
+		getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
+		isExtensible = Object.isExtensible,
+		freeze = Object.freeze,
 
-		var // We capture the built-in functions and methods as they are now and store them as references so that we can
-			// maintain some integrity. This is done to prevent scripts which run later from mischievously trying to get
-			// details about or alter the secrets stored on an object.
-			lazyBind = Function.prototype.bind.bind(Function.prototype.call),
+		hasOwn = lazyBind(Object.prototype.hasOwnProperty),
 
-			create = Object.create,
-			getPrototypeOf = Object.getPrototypeOf,
-			keys = Object.keys,
-			getOwnPropertyNames = Object.getOwnPropertyNames,
-			getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-			isExtensible = Object.isExtensible,
-			freeze = Object.freeze,
+		push = lazyBind(Array.prototype.push),
+		forEach = lazyBind(Array.prototype.forEach),
+		map = lazyBind(Array.prototype.map),
+		join = lazyBind(Array.prototype.join),
+		splice = lazyBind(Array.prototype.splice),
+		ArrayIndexOf = lazyBind(Array.prototype.indexOf),
 
-			hasOwn = lazyBind(Object.prototype.hasOwnProperty),
+		fromCharCode = String.fromCharCode,
 
-			push = lazyBind(Array.prototype.push),
-			forEach = lazyBind(Array.prototype.forEach),
-			map = lazyBind(Array.prototype.map),
-			join = lazyBind(Array.prototype.join),
-			splice = lazyBind(Array.prototype.splice),
-			ArrayIndexOf = lazyBind(Array.prototype.indexOf),
+		apply = lazyBind(Function.prototype.apply),
+		bind = lazyBind(Function.prototype.bind),
 
-			fromCharCode = String.fromCharCode,
-
-			apply = lazyBind(Function.prototype.apply),
-			bind = lazyBind(Function.prototype.bind),
-
-			// We only want to define with own properties of the descriptor.
-			define = (function(defineProperty) {
-				return function define(obj, name, desc) {
-					if ('value' in desc && !hasOwn(desc, 'value')
-						|| 'get' in desc && !hasOwn(desc, 'get')
-						|| 'set' in desc && !hasOwn(desc, 'set')
-						|| 'enumerable' in desc && !hasOwn(desc, 'enumerable')
-						|| 'writable' in desc && !hasOwn(desc, 'writable')
-						|| 'configurable' in desc && !hasOwn(desc, 'configurable'))
-						desc = createSafeDescriptor(desc);
-					return defineProperty(obj, name, desc);
-				};
-				function createSafeDescriptor(obj) {
-					if (obj == null) {
-						locked = true;
-						throw new TypeError('Argument cannot be null or undefined.');
-					}
-					obj = Object(obj);
-					var O = create(null),
-						k = keys(obj);
-					for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
-						O[key] = obj[key];
-					return O;
+		// We only want to define with own properties of the descriptor.
+		define = (function(defineProperty) {
+			return function define(obj, name, desc) {
+				if ('value' in desc && !hasOwn(desc, 'value')
+					|| 'get' in desc && !hasOwn(desc, 'get')
+					|| 'set' in desc && !hasOwn(desc, 'set')
+					|| 'enumerable' in desc && !hasOwn(desc, 'enumerable')
+					|| 'writable' in desc && !hasOwn(desc, 'writable')
+					|| 'configurable' in desc && !hasOwn(desc, 'configurable'))
+					desc = createSafeDescriptor(desc);
+				return defineProperty(obj, name, desc);
+			};
+			function createSafeDescriptor(obj) {
+				if (obj == null) {
+					locked = true;
+					throw new TypeError('Argument cannot be null or undefined.');
 				}
-			})(Object.defineProperty),
+				obj = Object(obj);
+				var O = create(null),
+					k = keys(obj);
+				for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
+					O[key] = obj[key];
+				return O;
+			}
+		})(Object.defineProperty),
 
-			storageType = getConfig(config, 'storageType', String, DEFAULT_STORAGE_TYPE),
-			inherit = getConfig(config, 'inherit', Boolean, true);
+		configure = function configure(config) {
 
-		var CouplerFactory = (function() {
+			if (config === undefined) {
+				config = Object.create(null);
+			} else if (Object(config) !== config) {
+				throw new TypeError('Object expected');
+			}
+
+			var storageType = getConfig(config, 'storageType', String, DEFAULT_STORAGE_TYPE),
+				inherit = getConfig(config, 'inherit', Boolean, true),
+
+				storageGenerators = Object.create(null);
+				
+			storageGenerators.WeakKeyedStore = WeakKeyedStoreFactory.create
+			if (WeakMapStoreFactory)
+				storageGenerators.WeakMap = WeakMapStoreFactory.create;
+
+			configureStorage(storageType);
+			configureInheritance(inherit);
+
+			function configureStorage(storageType) {
+				var storageGenerator = storageGenerators[storageType];
+				if (!storageGenerator)
+					throw new TypeError('Storage configuration not found for storage type "' + storageType + '".');
+				CouplerFactory.configureStorage(storageGenerator);
+			}
+
+			function configureInheritance(tf) {
+				CouplerFactory.configureInheritance(tf);
+			}
+
+			function create() {
+				var coupler = CouplerFactory.create();
+				coupler.toString = function() { return 'function SecretCoupler(object) { return secret; }'; };
+				return coupler;
+			}
+
+			var secrets = { };
+			define(secrets, 'create', {
+				value: create,
+				writable: true,
+				enumerable: false,
+				configurable: true
+			});
+			define(secrets, 'configure', {
+				value: configure,
+				writable: true,
+				enumerable: false,
+				configurable: true
+			});
+			return secrets;
+
+		};
+
+	var CouplerFactory = (function() {
 	
 	var inheritDefault = true,
 
@@ -520,52 +563,18 @@ var WeakMapStoreFactory = (function(WeakMap) {
 
 })(typeof WeakMap == 'function' ? WeakMap : undefined);
 
-		return (function() {
-
-			var storageGenerators = Object.create(null);
-			storageGenerators.WeakKeyedStore = WeakKeyedStoreFactory.create
-			if (WeakMapStoreFactory)
-				storageGenerators.WeakMap = WeakMapStoreFactory.create;
-
-			configureStorage(storageType);
-			configureInheritance(inherit);
-
-			function configureStorage(storageType) {
-				var storageGenerator = storageGenerators[storageType];
-				if (!storageGenerator)
-					throw new TypeError('Storage configuration not found for storage type "' + storageType + '".');
-				CouplerFactory.configureStorage(storageGenerator);
-			}
-
-			function configureInheritance(tf) {
-				CouplerFactory.configureInheritance(tf);
-			}
-
-			function create() {
-				var coupler = CouplerFactory.create();
-				coupler.toString = function() { return 'function SecretCoupler(object) { return secret; }'; };
-				return coupler;
-			}
-
-			return {
-				create: create,
-				configureStorage: configureStorage
-			};
-
-		})();
-
-	}
+	var secrets = configure();
 
 	// Export for Node.
 	if (typeof module == 'object' && typeof module.exports == 'object')
-		module.exports = Secrets;
+		module.exports = secrets;
 
 	// Export for AMD
-	else if (global && typeof global.define == 'function' && global.define.amd)
-		global.define(function() { return Secrets; });
+	else if (typeof global.define == 'function' && global.define.amd)
+		global.define(function() { return secrets; });
 
 	// Export as a global
 	else
-		global.Secrets = Secrets;
+		global.secrets = secrets;
 
-})(typeof global == 'undefined' || Object(global) !== global ? this : global, Object, String, Boolean, Error, TypeError);
+})(typeof global != 'undefined' && Object(global) === global ? global : typeof window != 'undefined' ? window : this, Object, String, Boolean, Error, TypeError);
